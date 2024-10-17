@@ -1,0 +1,589 @@
+---
+title: Modelo de análise preditiva de preços de venda de imóveis residenciais
+subtitle: Algoritmo de análise de regressão
+author: 
+  - affiliation: 
+      - id: Faculdade Senac DF
+        name: Luiz Antônio Gouveia de Oliveira
+date: last-modified
+date-format: "DD/MM/YYYY"
+format:
+  html:
+    code-fold: show
+    code-summary: "Ocultar/mostrar"
+    code-copy: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    toc-title: Sumário
+    title-block-banner: "#057bb4"
+    embed-resources: true
+    css: styles.css
+  pdf:
+    include-in-header: 
+      text: |
+execute:
+  warning: false
+  echo: false
+  eval: true
+  message: false
+editor: source
+editor_options: 
+  chunk_output_type: console
+reference-location: margin
+---
+
+
+
+```{r}
+
+# 1. Instalação e carregamento dos pacotes analítico necessários
+
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+#rm(list = ls(all = TRUE))
+
+# devtools::install_github("yutannihilation/ggsflabel")
+
+# Testa se o pacote "pacman" está instalado. Se necessário, faz a instalação
+if (!require(pacman)) install.packages("pacman")
+
+# Família de pacotes para manipulação de dados
+pacman::p_load(tidyverse,   
+               kableExtra,
+               RODBC,
+               ggmap,
+               sp,
+               rgdal,
+               scales,
+               rgeos,
+               ggrepel,
+               ggsflabel,
+               raster,
+               gtsummary,
+               gt,
+               gtable,
+               promises,
+               openxlsx,
+               sf,
+               codebook,
+               viridis,
+               factoextra,
+               corrplot,
+               varhandle,
+               broom,
+               labelled,
+               forcats,
+               stringr,
+               officer,
+               car,
+               bookdown,
+               caret,
+               Hmisc,
+               htmlTable,
+               Formula,
+               Sandwich,
+               zoo,
+               multcomp,
+               goftest,
+               xplorerr,
+               sourcetools,
+               olsrr,
+               quantreg)
+
+
+options(scipen = 999)
+options(digits = 6)
+options(OutDec = ",")
+
+
+
+```
+
+
+# <font color=#6a5acd>1. Apresentação do projeto</font>
+<span class="emphasized">O Airbnb oferece a muitos viajantes um lugar excelente, fácil e conveniente para ficar durante suas viagens. Da mesma forma, também tem dado a muitas pessoas a oportunidade de obter receitas adicionais, listando as suas residências para hospedagem de viajantes. 
+No entanto, com tantos anúncios disponíveis com preços variados, como pode um aspirante a anfitrião saber em que tipo de imóvel investir se o seu principal objetivo é listá-lo no Airbnb e obter receitas de aluguel? Além disso, se um viajante deseja encontrar o anúncio mais barato disponível, mas com certas características que prefere, como “estacionamento gratuito” etc, como ele sabe quais aspectos considerar para encontrar um anúncio adequado? Existem muitos fatores que influenciam o preço de uma listagem de opções para o viajante. 
+Assim, este projeto se propõe a identificar os fatores mais importantes que afetam o **preço de aluguel diário** de residências no AirBnb e, além disso, as características que são comuns entre as listagens mais caras de residências para alugar. Isso permitirá que um aspirante a anfitrião do Airbnb garanta que seu anúncio esteja provido com esses atributos importantes para que ele possa cobrar um preço mais alto sem perder clientes. Além disso, o viajante também conhecerá os fatores a serem considerados para obter o menor preço possível e ao mesmo tempo garantir certas características de sua preferência.
+Para tanto, será elaborado um modelo de análise de regressão linear utilizando as seguintes variáveis explicativas:. </span>
+
+> - host_is_superhost, ou seja, se o proprietário do imóvel é classificado como **super anfitrião** ou não;
+
+> - host_identity_verified, ou seja, se o proprietário do imóvel tem a **identidade verificada**;
+
+> - room_type, ou seja, o **tipo de acomodação** (imóvel inteiro, quarto inteiro, quarto privativo etc);
+
+> - accommodates, ou seja, **quantas pessoas** o imóvel acomoda;
+
+> - bathrooms, ou seja, a **quantidade de banheiros** do imóvel; e
+
+> - bedrooms, ou seja, a **quantidade de quartos** do imóvel.
+
+
+
+# <font color=#6a5acd>2. Identificação e coleta das bases de dados</font>
+<span class="emphasized">As bases de dados para este projeto foram obtidos do Kaggle. Como o projeto faz parte da disciplina **Análise Preditiva**, usamos o conjunto de dados do Airbnb para Seattle e analisamos as listagens em Seattle. As bases de dados podem ser obtidas no endereço https://www.kaggle.com/datasets/airbnb/seattle?select=listings.csv.</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+
+# Carregando a base de dados
+listing <- read_csv("~/Downloads/Faculdade SENAC DF/2024.1/Analise preditiva/listings.csv")
+
+
+# Verificando o tamanho da base de dados
+dim(listing)
+
+# Verificando a estrutura da base de dados
+str(listing)
+
+
+
+```
+
+
+# <font color=#6a5acd>3. Preparação e limpeza da base de dados</font>
+<span class="emphasized">Como o conjunto de dados do Kaggle não era muito adequado para este projeto de análise preditiva, foi necessário alterar o formato de alguns dados. Também foi necessário fazer uma preparação de dados separada para análise exploratória e aprendizado de máquina. As principais transformações nos dados foram:</span>
+
+> - Converter todas as colunas de preço das listagens de *strings* em *floats* e também remover o sinal '$';
+
+> - Alterar os valores de NaN para o número inteiro 0;
+
+> - Remover da base de dados as colunas com as variáveis que não são de interesse da análise, como listagem_url, scrape_id etc;
+
+> - Limpar os dados textuais em um formato que seja adequado para a análise;
+
+> - Codificar as variáveis categóricas para que possam ser ajustadas posteriormente nos modelos de regressão;
+
+> - Separar os dados em variáveis preditoras e de resposta;
+
+> - Separar os dados em conjuntos de treinamento e teste (conjuntos de treinamento: conjuntos de testes = 80%:20%).
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Transformando as variáveis de preço do tipo CHARACTER para NUMERIC
+listing <- listing %>%
+  mutate(price_num = as.numeric(gsub("[$, ]", "", price)),
+         weekly_price_num = as.numeric(gsub("[$, ]", "", weekly_price)),
+         monthly_price_num = as.numeric(gsub("[$, ]", "", monthly_price)),
+         security_deposit_num = as.numeric(gsub("[$, ]", "", security_deposit)),
+         extra_people_num = as.numeric(gsub("[$, ]", "", extra_people)),
+         host_response_rate_num = as.numeric(gsub("[%, ]", "", host_response_rate)),
+         host_acceptance_rate_num = as.numeric(gsub("[%, ]", "", host_acceptance_rate)))
+
+# Selecionando as variáveis de interesse
+
+listing <- listing[, c(1, 4, 9, 17, 19:21, 26, 29:31, 33:34, 36:55, 57, 63, 65, 66, 68:99)]
+
+```
+
+
+# <font color=#6a5acd>4. Análise exploratória da base de dados</font>
+<span class="emphasized">Na análise exploratória, são descritos os dados da variável de resposta e dos preditores em termos de estatísticas resumidas importantes, como média, moda, mediana, desvio padrão, intervalo, assimetria e curtose. São apresentados, ainda, os gráficos de histograma e box-plot também para cada variável.</span>
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Resumo das estatísticas descritivas das variáveis de interesse
+
+summary(listing$price_num)
+summary(listing$host_is_superhost) 
+summary(listing$host_identity_verified) 
+summary(listing$room_type) 
+summary(listing$bedrooms) 
+summary(listing$bathrooms) 
+summary(listing$accommodates) 
+
+# Imputando valores para as observações que têm NAs nas variáveis binárias. Primeiro, criamos uma função para repôr os valores NAs
+
+replace_na_logical <- function(df, replace_value = FALSE) {
+  # Identify columns with logical data type
+  logical_cols <- sapply(df, is.logical) 
+
+  # Replace NAs in logical columns
+  df[, logical_cols] <- lapply(df[, logical_cols], function(col) {
+    col[is.na(col)] <- replace_value
+    return(col)
+  })
+
+  return(df)
+}
+
+# Agora, vamos repôr os valores NAs pelo valor lógico FALSE
+
+listing <- replace_na_logical(listing)
+
+# Vamos checar se os valores NAs foram repostos?
+
+summary(listing$host_is_superhost) 
+summary(listing$host_identity_verified) 
+
+
+# Imputando valores para as observações que têm NAs nas variáveis numéricas. Primeiro, criamos uma função para repôr os valores NAs pela mediana das variáveis.
+
+replace_na_with_median <- function(df) {
+  # Identify numeric columns
+  numeric_cols <- sapply(df, is.numeric)
+  # Replace NAs with median in each numeric column
+  for (col in names(df)[numeric_cols]) {
+    df[[col]][is.na(df[[col]])] <- median(df[[col]], na.rm = TRUE)
+  }
+
+  return(df)
+}
+
+
+# Agora, vamos repôr os valores NAs pela mediana das variáveis
+
+listing <- replace_na_with_median(listing)
+
+# Vamos checar se os valores NAs foram repostos?
+
+summary(listing$bedrooms) 
+summary(listing$bathrooms) 
+
+```
+
+
+<span class="emphasized">De acordo com a análise do resumo das principais estatísticas descritivas da base de dados, verifica-se que as variáveis binárias **host_is_superhost** e **host_identity_verified** possuem, cada uma, duas observações NAs. Assim, aplica-se a função de reposição dos valores dessas observações onde se imputou o valor lógico **FALSE**.</span>
+<span class="emphasized">Da mesma forma, observou-se que que as variáveis numéricas **bedrooms** e **bathrooms** também apresentaram valores NAs, os quais foram repostos pelos respectivos valores de medianas por meio da função de imputação de valores numéricos.</span>
+<span class="emphasized">A seguir, são apresentados os gráficos que expressam as distribuições de frequência dos dados.</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Calculando a média e os quantis das variáveis de interesse
+describe(listing$price_num)
+describe(listing$host_is_superhost)
+describe(listing$host_identity_verified)
+describe(listing$accommodates)
+describe(listing$bedrooms)
+describe(listing$bathrooms)
+
+# Gráfico de histograma das variáveis de interesse
+hist(listing$price_num, main = "Histograma do preço do aluguel", xlab = "Preço do aluguel", col = "darkmagenta", xlim = c(0,1100))
+
+hist(listing$accommodates, main = "Quantas pessoas o imóvel acomoda?", xlab = "Qtde de pessoas", ylab = "Frequência", col = "darkred", xlim = c(0,20), ylim = c(0, 1700))
+
+hist(listing$bedrooms, main = "Número de quartos do imóvel", ylab = "Frequência", col = "darkblue", xlim = c(0,8), xlab = "Qtde de quartos")
+
+hist(listing$bathrooms, main = "Número de banheiros do imóvel", ylab = "Frequência", col = "darkgreen", xlim = c(0,8), xlab = "Qtde de banheiros")
+
+# Gráfico de boxplot das variáveis de interesse
+boxplot(listing$price_num,  main = "Box plot do preço do aluguel", xlab = "US$", col = "darkmagenta", horizontal = T)
+
+boxplot(listing$accommodates,  main = "Box plot da capacidade de acomodação do imóvel", xlab = "Qtde de pessoas", col = "darkred", horizontal = T)
+
+boxplot(listing$bedrooms,  main = "Box plot do número de quartos do imóvel", xlab = "Qtde de banheiros", col = "darkgreen", horizontal = T)
+
+boxplot(listing$bathrooms,  main = "Box plot do número de quartos do imóvel", xlab = "Qtde de quartos", col = "darkblue", horizontal = T)
+
+
+# Gráficos do preço do aluguel do imóvel em relação às variáveis explicativas 
+require(gridExtra)
+p1 <- ggplot(listing, aes(as.factor(host_is_superhost), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "host_is_superhost")
+p2 <- ggplot(listing, aes(as.factor(host_identity_verified), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "host_identity_verified")
+p3 <- ggplot(listing, aes(as.factor(room_type), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "room_type")
+p4 <- ggplot(listing, aes(as.factor(accommodates), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "accommodates")
+p5 <- ggplot(listing, aes(as.factor(bathrooms), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "bathrooms")
+p6 <- ggplot(listing, aes(as.factor(bedrooms), price_num)) + 
+  geom_bar(stat = "identity") + 
+  labs(y = "price", x = "bedrooms")
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol = 3)
+
+
+
+```
+
+
+<span class="emphasized">De acordo com a estatísticas acima, o preço de aluguel do imóvel do Airbnb tende a ser mais alto quando o proprietário **não é um superhost** em comparação a quando o proprietário **é um superhost**.</span>
+<span class="emphasized">O preço tende a ser um pouco mais alto quando a identidade do host **é verificada** em comparação a quando **não é verificada**.</span>
+<span class="emphasized">Em termos de tipo de quarto, o preço tende a ser muito mais elevado para **casa/apto inteiro** em relação ao preço do **quarto privado**, e principalmente ao preço do **quarto partilhado**.</span>
+<span class="emphasized">Para a variável **capacidade de acomodação**, não existe um padrão claro entre a quantidade de pessoas acomodadas no imóvel e o preço do aluguel. Pelo gráfico, parece que os imóveis que acomodam 4 pessoas têm o preço mais alto, seguidos daqueles que acomodam 6 e 2 pessoas.</span>
+<span class="emphasized">Para a variável **banheiros**, os anúncios com 1 banheiro têm o preço mais alto, seguidos daqueles com 2 banheiros. Não existe um padrão para o restante dos imóveis com outras quantidades de banheiros.</span>
+<span class="emphasized">Para a variável **quartos (dormitórios)**, os imóveis de 1 e 2 dormitórios apresentam o preço mais elevado, e o preço tende a diminuir à medida que aumenta o número de dormitórios.</span>
+
+
+# <font color=#6a5acd>5. Especificação do modelo</font>
+<span class="emphasized">A regressão linear é um algoritmo de aprendizado de máquina baseado no aprendizado supervisionado. Ele executa a tarefa de regressão para prever o valor de uma variável dependente (neste caso, o preço do aluguel do imóvel - **preco_num**) com base em determinadas variáveis independentes (neste caso, as variáveis preditoras **bedrooms**, **bathrooms**, **accommodates**, **host_is_superhost**, **host_identity_verified** e **room_type**).</span>
+<span class="emphasized">Em seguida, tenta-se encontrar uma relação linear entre as variáveis preditoras (variáveis independentes) e a variável predita (variável dependente). Aqui, treinamos o modelo para seguir a seguinte fórmula:</span> 
+
+$preco\,num = \beta _{0}+ \beta_{1}\ast host\,is\,superhost+\beta_{2}\ast host\,identity\,verified+\beta_{3}\ast room\,type+\beta_{4}\ast bedroom+\beta_{5}\ast bathroom+\beta_{6}\ast accommodates+\varepsilon$ 
+
+onde:
+
+> - preco_num = preço do aluguel do imóvel
+
+> - host_is_superhost, ou seja, se o proprietário do imóvel é classificado como **super anfitrião** ou não;
+
+> - host_identity_verified, ou seja, se o proprietário do imóvel tem a **identidade verificada**;
+
+> - room_type, ou seja, o **tipo de acomodação** (imóvel inteiro, quarto inteiro, quarto privativo etc);
+
+> - accommodates, ou seja, **quantas pessoas** o imóvel acomoda;
+
+> - bathrooms, ou seja, a **quantidade de banheiros** do imóvel; e
+
+> - bedrooms, ou seja, a **quantidade de quartos** do imóvel.
+
+**Atenção!**
+
+<span class="emphasized">Como as variáveis **accommodates** e **bathrooms** não apresentaram uma distribuição normal, aplicou-se a transformação logarítmica para linearizar as relações entre variáveis, tornando o modelo de regressão linear simples apropriado para os dados transformados</span> 
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Especificação do modelo
+listing_model <- lm(log(price_num) ~ host_is_superhost + host_identity_verified + log(accommodates) + bathrooms + bedrooms + room_type, data = listing)
+
+```
+
+<span class="emphasized">A seguir, são apresentados o resultado do modelo de regressão final usado e as evidências de que o modelo se ajusta razoavelmente bem às suposições. A saída do modelo deve incluir uma tabela com coeficientes, os erros-padrão e valores de p ou intervalos de confiança.</span> 
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+
+summary2 <- tidy(listing_model)
+
+kable(summary2, format = 'markdown',booktabs = T, caption = 'Resumo do modelo de regressão', digits = 10)
+
+```
+
+<span class="emphasized">As variáveis **host_is_superhost** e **host_identity_verified**, **room_type** não são elegíveis para verificação de suposições porque são variáveis categóricas. Portanto, iremos excluí-las aqui para este propósito.</span> 
+
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Checagem da linearidade do modelo
+
+ggplot(listing_model,aes(x = log(listing$accommodates), y = listing_model$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos do modelo vs accommodates",x = "accommodates",y = "Resíduos")
+
+ggplot(listing_model,aes(x = log(listing$bathrooms), y = listing_model$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs bathrooms",x = "bathrooms",y = "Resíduos")
+
+ggplot(listing_model,aes(x = log(listing$bedrooms), y = listing_model$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs bedrooms",x = "bedrooms",y = "Resíduos")
+
+ggplot(listing_model,aes(x = log(listing$price_num), y = listing_model$residual)) +
+  geom_point(alpha = .7) + geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs price_num",x = "price_num",y = "Resíduos")
+
+```
+
+<span class="emphasized">Olhando para os gráficos das variáveis do modelo em relação aos resíduos, a maioria dos pontos parece estar igualmente distribuída acima e abaixo da linha de resíduos 0,0 e são distribuídos aleatoriamente, de modo que nenhum padrão claro é identificado e a suposição de linearidade é válida.</span> 
+<span class="emphasized">A seguir, verifica-se a independência das variáveis e a igualdade de variância.</span> 
+
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Checagem da independência das variáveis e da igualdade de variância
+
+plot(listing_model,which = 1,col = c("darkred"))
+
+```
+
+<span class="emphasized">Observando o gráfico de resíduos versus valores ajustados, a maioria dos pontos parece estar distribuída aleatoriamente e não parece haver um padrão claro. A linha vermelha está muito próxima da linha plana e da linha de resíduos 0,0. Os pontos também parecem estar distribuídos igualmente acima e abaixo da linha de resíduos 0,0. Portanto, as suposições de independência e igualdade de variância são válidas.</span> 
+<span class="emphasized">A seguir, verifica-se o pressuposto da normalidade do modelo.</span> 
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Checagem do pressuposto da normalidade do modelo 
+
+plot(listing_model,which = 2,col = c("darkgreen"))
+
+```
+
+<span class="emphasized">Observando o gráfico Q-Q normal, a maioria dos pontos no gráfico parece cair na linha de ângulo de 45 graus, com alguns desvios em ambas as extremidades, o que pode ser causado por valores discrepantes no conjunto de dados que precisam de investigações adicionais. Portanto, a suposição de normalidade é válida e concluímos que as principais suposições são plausíveis neste modelo.</span>
+
+
+# <font color=#6a5acd>6. Interpretação dos resultados do modelo</font>
+<span class="emphasized">Somente os relacionamentos relativos às variáveis **room_type (Private room)**, **log(accommodates)**, **log(banheiros)** e **bedrooms** serão interpretados, uma vez que apenas esses quatro preditores são significativos no nível 0,05.</span>
+<span class="emphasized">Para o preditor **room_type8**, a resposta **Casa/apto inteiro** é a linha de base aqui. Espera-se que o preço médio de aluguel diminua em 0,329859 unidade em média, ao preço médio para Casa/apto inteiro, enquanto mantém outras variáveis constantes.</span>
+<span class="emphasized">Para o preditor **accommodates**, espera-se que o preço médio de aluguel do imóvel aumente em e^(0,328015)-1 = 38,82% para cada incremento unitário adicional em acomoda em média, enquanto mantém outras variáveis constantes.</span>
+<span class="emphasized">Para a variável **bathrooms**, espera-se que o preço médio de listagem aumente em e^(0,400984)-1 = 49,33% para cada incremento de unidade adicional em banheiros, em média, enquanto mantém outras variáveis constantes.</span>
+<span class="emphasized">Para a variável **bedrooms**, espera-se que o preço médio de listagem aumente em média 0,110732 unidades para cada incremento de unidade adicional em quartos, mantendo outras variáveis constantes.</span>
+
+<span class="emphasized">Existem valores discrepantes (potenciais), pontos de alavancagem ou pontos de influência? A seguir, apresenta-se o gráfico Resíduos x Pontos de alavancagem para verificação de eventuais valores discrepantes ou pontos de influência. Se houver pontos influentes e/ou outliers, estes serão excluídos e o modelo será ajustado.
+<span class="emphasized".</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Gráfico da Resíduos x pontos de alavancagem
+
+plot(listing_model,which = 5, col = c("darkmagenta"))
+
+
+```
+
+<span class="emphasized">Olhando para o gráfico Resíduos vs Alavancagem, há dois pontos influentes, o ponto 2646 e o ponto 1074, que estão além da marca 1 da distância de Cook. Como ambos os pontos estão além da marca de 0,5 na pontuação de alavancagem, ambos também são pontos de alta influência, bem como possíveis discrepâncias.</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+# Informação considerando os dois pontos de influência
+cooksdistance <- cooks.distance(listing_model)
+influential <- as.numeric(names(cooksdistance)[(cooksdistance > 3 * mean(cooksdistance, na.rm = TRUE))]) 
+listing[influential,]
+
+
+# Removendo os dois pontos de influência identificados no gráfico de Distância de Cook e reajustando o modelo sem esses pontos 
+subset2 <- subset(listing, id != '2646' & id != '1074')
+new_listing <- lm(log(price_num) ~ host_is_superhost + host_identity_verified + 
+                    room_type + log(accommodates) + bathrooms + bedrooms, data = subset2)
+summary3 = tidy(new_listing)
+kable(summary3, format = 'markdown',booktabs = T, caption = 'Resumo do Modelo de Regressão', digits = 10)
+
+```
+
+<span class="emphasized">A seguir, apresenta-se novamente o gráfico da Distância de Cook, agora sem os dois pontos de influência identificados.</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+
+plot(new_listing,which = 5, col = c("darkgreen"))
+
+
+```
+
+<span class="emphasized">A seguir, verifica-se novamente o pressuposto da linearidade do modelo.</span>
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+
+ggplot(new_listing, aes(x = log(subset2$accommodates), y = new_listing$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs accommodates", x = "accommodates", y = "Resíduos")
+
+ggplot(new_listing,aes(x = log(subset2$bathrooms), y = new_listing$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs bathrooms", x = "bathrooms", y = "Resíduos")
+
+ggplot(new_listing,aes(x = log(subset2$bedrooms), y = new_listing$residual)) +
+  geom_point(alpha = .7) +  geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs bedrooms",x = "bedrooms", y = "Resíduos")
+
+ggplot(new_listing,aes(x = log(subset2$price_num), y = new_listing$residual)) +
+  geom_point(alpha = .7) + geom_hline(yintercept = 0,col = "red3") + theme_classic() +
+  labs(title = "Resíduos vs price_num", x = "price_num",y = "Resíduos")
+
+
+
+```
+
+
+<span class="emphasized">Verificando novamente as suposições de independência e normalidade, observa-se que os pontos estão distribuídos aleatoriamente e seguem a linha do ângulo de 45 graus. Portanto, ambas as suposições ainda são válidas.</span>
+
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+
+
+plot(new_listing, which = 1,col = c("darkblue"))
+
+plot(new_listing, which = 2,col = c("darkgreen"))
+
+
+
+```
+
+<span class="emphasized">Em conclusão, após a remoção dos dois pontos influentes, todos os pressupostos continuam a ser válidos e não existem mais pontos influentes ou pontos de alavancagem no modelo, sugerindo que o novo modelo provavelmente se ajustará melhor aos dados.</span>
+<span class="emphasized">No novo resumo de saída:</span>
+
+> - Para o preditor **room_type**, espera-se que o preço médio de aluguel diminua em 0,343339 unidade em média, ao preço médio para Casa/apto inteiro (linha de base), enquanto mantém outras variáveis constantes;
+
+> - Para o preditor **accommodates**, espera-se que o preço médio de aluguel aumente em e^(0,303302)-1 = 35,43% para cada incremento unitário adicional em **accommodates** em média, enquanto mantém outras variáveis constantes;
+
+> - Para a variável **bathrooms**, espera-se que o preço médio de aluguel aumente em e^(0,403184)-1 = 49,66% para cada incremento de unidade adicional em banheiros, em média, enquanto mantém outras variáveis constantes;
+
+> - Para a variável **bedrooms**, espera-se que o preço médio de aluguel aumente em média 0,118474 unidade para cada incremento de unidade adicional em quartos, mantendo outras variáveis constantes.
+
+De todo modo, existem algumas limitações potenciais desta análise, a saber:</span>
+
+> - Embora os dois valores discrepantes tenham sido removidos da análise, o modelo ainda não conseguiu capturar a verdadeira relação entre essas duas variáveis categóricas - host_is_superhost e host_identity_verified - e a variável de resposta - preço de acordo com a saída do modelo de regressão.
+
+> - Para alguns gráficos de resíduos, uma boa quantidade de pontos ainda tende a se agrupar em torno da extremidade inferior (marca 0) dos gráficos e, no gráfico qq normal, ainda existem alguns desvios em ambas as extremidades. Pode haver outros fatores envolvidos, e os erros residuais devidos a outros fatores não medidos precisam ser investigados mais detalhadamente.</span>
+
+
+
+
